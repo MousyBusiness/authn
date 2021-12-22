@@ -138,7 +138,7 @@ func New(config Config) (*firebaseFlow, error) {
 		log.Warn("default redirection URL is unencrypted")
 	}
 
-	re := regexp.MustCompile(`^https?://[\w-.]+(/.+)$`)
+	re := regexp.MustCompile(`^https?://[\w-.:]+(/.+)$`)
 	if !re.MatchString(config.RedirectURL) {
 		return nil, errors.New("invalid redirect url")
 	}
@@ -155,7 +155,68 @@ func New(config Config) (*firebaseFlow, error) {
 	return flow, nil
 }
 
-func RefreshFirebaseToken(token creds.RefreshToken, secret APIKey) (RefreshResponse, error) {
+// Auth generates a URL which the user can click to navigate to the
+// Google login page to authenticate their CLI API calls using a Firebase user
+func (f *firebaseFlow) Auth() *creds.Credentials {
+	f.credentials = nil
+
+	authWG = new(sync.WaitGroup)
+	authWG.Add(1)
+
+	f.serve()
+
+	s := strings.Join(scopes, " ")
+
+	params := url.Values{}
+	params.Add("client_id", f.config.ClientID)
+	params.Add("scope", s)
+	params.Add("response_type", "code")
+	params.Add("state", nonce)
+	params.Add("redirect_uri", f.config.RedirectURL)
+	params.Add("access_type", "offline")
+
+	uri := authURL + "?" + params.Encode()
+
+	if static.IsDesktop() {
+		if err := static.Open(uri); err != nil {
+			fmt.Println("couldnt open browser, please visit manually")
+		}
+	}
+
+	fmt.Printf("Visit the URL for the auth dialog: %v\n", uri)
+
+	authWG.Wait()
+	time.Sleep(time.Second)
+	if err := f.server.Shutdown(context.Background()); err != nil {
+		log.Error(errors.Wrap(err, "error while shutting down server"))
+	}
+
+	return f.credentials
+}
+
+func (f *firebaseFlow) Refresh(refreshToken creds.RefreshToken) (*creds.Credentials, error) {
+	token, err := doFirebaseRefresh(refreshToken, APIKey(f.config.APIKey))
+	if err != nil {
+		return nil, errors.Wrap(err, "require auth token")
+	}
+
+	if token.IDToken == "" {
+		return nil, errors.New("require auth token: refresh token response invalid")
+	}
+
+	// assign the idToken globally so it can be returned by Auth
+	if sec, err := strconv.Atoi(token.ExpiresIn); err == nil {
+		f.credentials.Expiry = time.Now().Add(time.Duration(sec-60) * time.Second) // allow 1 minute of buffer
+	}
+
+	//f.credentials.UID = viper.GetString(config.UIDKey) // TODO
+	f.credentials.RefreshToken = refreshToken
+	f.credentials.IDToken = creds.IDToken(token.IDToken)
+
+	return f.credentials, nil
+}
+
+func doFirebaseRefresh(token creds.RefreshToken, secret APIKey) (RefreshResponse, error) {
 	b, err := json.Marshal(struct {
 		RefreshToken string `json:"refresh_token"`
 		GrantType    string `json:"grant_type"`
@@ -190,71 +251,6 @@ func RefreshFirebaseToken(token creds.RefreshToken, secret APIKey) (RefreshRespo
 	return r, nil
 }
 
-// Auth generates a URL which the user can click to navigate to the
-// Google login page to authenticate their CLI API calls using a Firebase user
-func (f *firebaseFlow) Auth(urlCh chan string) *creds.Credentials {
-	f.credentials = nil
-
-	authWG = new(sync.WaitGroup)
-	authWG.Add(1)
-
-	f.serve()
-
-	s := strings.Join(scopes, " ")
-
-	params := url.Values{}
-	params.Add("client_id", f.config.ClientID)
-	params.Add("scope", s)
-	params.Add("response_type", "code")
-	params.Add("state", nonce)
-	params.Add("redirect_uri", f.config.RedirectURL)
-	params.Add("access_type", "offline")
-
-	uri := authURL + "?" + params.Encode()
-
-	if urlCh != nil {
-		urlCh <- uri
-	}
-
-	if static.IsDesktop() {
-		if err := static.Open(uri); err != nil {
-			fmt.Println("couldnt open browser, please visit manually")
-		}
-	}
-
-	fmt.Printf("Visit the URL for the auth dialog: %v\n", uri)
-
-	authWG.Wait()
-	time.Sleep(time.Second)
-	if err := f.server.Shutdown(context.TODO()); err != nil {
-		log.Error(errors.Wrap(err, "error while shutting down server"))
-	}
-
-	return f.credentials
-}
-
-func (f *firebaseFlow) Refresh(refreshToken creds.RefreshToken) (*creds.Credentials, error) {
-	token, err := RefreshFirebaseToken(refreshToken, APIKey(f.config.APIKey))
-	if err != nil {
-		return nil, errors.Wrap(err, "require auth token")
-	}
-
-	if token.IDToken == "" {
-		return nil, errors.New("require auth token: refresh token response invalid")
-	}
-
-	// assign the idToken globally so it can be returned by Auth
-	if sec, err := strconv.Atoi(token.ExpiresIn); err == nil {
-		f.credentials.Expiry = time.Now().Add(time.Duration(sec-60) * time.Second) // allow 1 minute of buffer
-	}
-
-	//f.credentials.UID = viper.GetString(config.UIDKey) // TODO
-	f.credentials.RefreshToken = refreshToken
-	f.credentials.IDToken = creds.IDToken(token.IDToken)
-
-	return f.credentials, nil
-}
-
 var callback CallbackFn
 
 func handlerWrapper(w http.ResponseWriter, r *http.Request) {
@@ -275,7 +271,7 @@ func (f *firebaseFlow) serve() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(f.config.redirectPath, handlerWrapper)
-	f.server.Handler = mux
+	server.Handler = mux
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil {

@@ -32,7 +32,7 @@ type pkceFlow struct {
 }
 
 const (
-	defaultPort = "63353"
+	defaultPort         = "63353"
 	defaultRedirectPath = "/login/callback"
 )
 
@@ -52,7 +52,7 @@ type Config struct {
 	Title string
 	// Port for localhosted redirect server if used
 	// default 63353
-	Port  string
+	Port string
 
 	ClientID string
 	Issuer   string // e.g. "https://oie-1234567.oktapreview.com/oauth2/default"
@@ -93,7 +93,7 @@ func New(config Config) (*pkceFlow, error) {
 		log.Warn("default redirection URL is unencrypted")
 	}
 
-	re  := regexp.MustCompile(`^https?://[\w-.]+(/.+)$`)
+	re := regexp.MustCompile(`^https?://[\w-.:]+(/.+)$`)
 	if !re.MatchString(config.RedirectURL) {
 		return nil, errors.New("invalid redirect url")
 	}
