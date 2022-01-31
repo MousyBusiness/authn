@@ -170,7 +170,7 @@ func (p *pkceFlow) Refresh(refreshToken creds.RefreshToken) (*creds.Credentials,
 	}
 
 	if code != http.StatusOK {
-		return nil, errs.NewHttpError(code, body, "error response from token exchange")
+		return nil, errs.NewHttpError(code, "error response from token exchange")
 	}
 
 	// process the response
@@ -227,7 +227,7 @@ func (p *pkceFlow) exchangeCode(authorizationCode string, callbackURL string) (c
 	}
 
 	if code != http.StatusOK {
-		return "", "", "", 0, errs.NewHttpError(code, body, "error response from token exchange")
+		return "", "", "", 0, errs.NewHttpError(code, "error response from token exchange")
 	}
 
 	// process the response

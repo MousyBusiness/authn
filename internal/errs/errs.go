@@ -1,9 +1,7 @@
 package errs
 
 import (
-	"encoding/json"
 	"fmt"
-	"github.com/mousybusiness/gooseclip-backend/pkg/model"
 	"github.com/pkg/errors"
 )
 
@@ -20,15 +18,8 @@ type HttpError struct {
 	err  error
 }
 
-func NewHttpError(code int, b []byte, fallback string) HttpError {
-	e := errors.New(fallback)
-
-	if b != nil {
-		var r model.ErrorResponse
-		if err := json.Unmarshal(b, &r); err == nil {
-			e = errors.New(r.Error)
-		}
-	}
+func NewHttpError(code int, msg string) HttpError {
+	e := errors.New(msg)
 
 	return HttpError{
 		code: code,

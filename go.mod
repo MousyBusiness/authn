@@ -4,7 +4,6 @@ go 1.17
 
 require (
 	github.com/mousybusiness/go-web v1.2.7
-	github.com/mousybusiness/gooseclip-backend v1.7.26
 	github.com/nirasan/go-oauth-pkce-code-verifier v0.0.0-20170819232839-0fbfe93532da
 	github.com/okta/okta-jwt-verifier-golang v1.1.2
 	github.com/pkg/errors v0.9.1
