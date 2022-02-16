@@ -113,17 +113,17 @@ type (
 )
 
 func New(config Config) (*firebaseFlow, error) {
-	if config.Title == "" {
-		return nil, errors.New("require Title")
-	}
-
-	if config.ClientID == "" {
-		return nil, errors.New("require ClientID")
-	}
-
-	if config.ClientSecret == "" {
-		return nil, errors.New("require ClientSecret")
-	}
+	//if config.Title == "" && !config.{
+	//	return nil, errors.New("require Title")
+	//}
+	//
+	//if config.ClientID == "" {
+	//	return nil, errors.New("require ClientID")
+	//}
+	//
+	//if config.ClientSecret == "" {
+	//	return nil, errors.New("require ClientSecret")
+	//}
 
 	if config.APIKey == "" {
 		return nil, errors.New("require APIKey")
