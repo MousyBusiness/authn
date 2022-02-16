@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -e
+
+DIR=$(dirname "$0")
+BUILD=$DIR/../build
+ENTRYPOINT_DIR=$DIR/../pkg/authn
+ANDROID_AAR=Authn.aar
+ANDROID_JAR=Authn-sources.jar
+IOS_NAME=Authn.xcframework
+ANDROID_DIR=$BUILD/android
+IOS_DIR=$BUILD/ios
+
+mkdir -p "$BUILD"
+mkdir -p "$ANDROID_DIR"
+mkdir -p "$IOS_DIR"
+
+while [[ -n $1 ]]; do
+  case $1 in
+  --android)
+    ANDROID_ONLY=true
+    ;;
+  --ios)
+    IOS_ONLY=true
+    ;;
+  --mac)
+    MAC_ONLY=true
+    ;;
+  *)
+    echo "unexpected arg" && exit 1
+    ;;
+  esac
+  shift
+done
+
+
+
+bind_mobile() {
+  # get go mobile
+  go mod download golang.org/x/mobile
+
+  if ! [[ "$IOS_ONLY" == "true" ]]; then
+    echo "Building Android"
+    (cd "$ENTRYPOINT_DIR" && gomobile bind -o $ANDROID_AAR --target=android)
+    mv "$ENTRYPOINT_DIR/$ANDROID_AAR" "$ANDROID_DIR"
+    mv "$ENTRYPOINT_DIR/$ANDROID_JAR" "$ANDROID_DIR"
+  fi
+
+  if ! [[ "$ANDROID_ONLY" == "true" ]]; then
+    echo "Building iOS"
+    (cd "$ENTRYPOINT_DIR" && gomobile bind  --target=ios/arm64) #-o $IOS_NAME
+    rm -rf "$IOS_DIR/$IOS_NAME"
+    mv "$ENTRYPOINT_DIR/$IOS_NAME" "$IOS_DIR"
+  fi
+}
+
+# Build Darwin (MacOS) shared library
+echo "Building Darwin shared library"
+(cd $DIR/../cmd/lib && GOOS=darwin GOARCH=amd64 go build -o ../../build/darwin_amd64/authn.dylib -buildmode=c-shared main.go)
+[[ "$MAC_ONLY" == "true" ]] && exit 0
+
+# Build Linux shared library
+#echo "Building Linux shared library"
+#(cd $DIR/../cmd/lib && GOOS=linux GOARCH=amd64 go build -o ../../build/linux_amd64/authn.so -buildmode=c-shared main.go)
+
+# Build Windows shared library
+#echo "Building Windows shared library"
+#(cd $DIR/../cmd/lib && GOOS=windows GOARCH=amd64 go build -o ../../build/windows_amd64/authn.so -buildmode=c-shared main.go)
+
+bind_mobile

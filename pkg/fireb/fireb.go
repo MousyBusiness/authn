@@ -149,7 +149,8 @@ func New(config Config) (*firebaseFlow, error) {
 	config.redirectPath = hits[0][1]
 
 	flow := &firebaseFlow{
-		config: config,
+		config:      config,
+		credentials: &creds.Credentials{},
 	}
 	callback = flow.redirectHandler
 	return flow, nil
