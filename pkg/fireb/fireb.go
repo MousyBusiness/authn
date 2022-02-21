@@ -17,7 +17,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -38,9 +37,6 @@ var (
 		"https://www.googleapis.com/auth/userinfo.email",
 		"https://www.googleapis.com/auth/userinfo.profile",
 	}
-
-	nonce  = rstr.RandomString(12)
-	authWG *sync.WaitGroup
 )
 
 type (
@@ -48,6 +44,8 @@ type (
 		config      Config
 		credentials *creds.Credentials
 		server      *http.Server
+		waitc       chan struct{}
+		nonce       string
 	}
 
 	APIKey string
@@ -151,6 +149,8 @@ func New(config Config) (*firebaseFlow, error) {
 	flow := &firebaseFlow{
 		config:      config,
 		credentials: &creds.Credentials{},
+		waitc:       make(chan struct{}),
+		nonce:       rstr.RandomString(12),
 	}
 	callback = flow.redirectHandler
 	return flow, nil
@@ -158,11 +158,8 @@ func New(config Config) (*firebaseFlow, error) {
 
 // Auth generates a URL which the user can click to navigate to the
 // Google login page to authenticate their CLI API calls using a Firebase user
-func (f *firebaseFlow) Auth() *creds.Credentials {
+func (f *firebaseFlow) Auth(ctx context.Context) *creds.Credentials {
 	f.credentials = nil
-
-	authWG = new(sync.WaitGroup)
-	authWG.Add(1)
 
 	f.serve()
 
@@ -172,7 +169,7 @@ func (f *firebaseFlow) Auth() *creds.Credentials {
 	params.Add("client_id", f.config.ClientID)
 	params.Add("scope", s)
 	params.Add("response_type", "code")
-	params.Add("state", nonce)
+	params.Add("state", f.nonce)
 	params.Add("redirect_uri", f.config.RedirectURL)
 	params.Add("access_type", "offline")
 
@@ -185,8 +182,12 @@ func (f *firebaseFlow) Auth() *creds.Credentials {
 	}
 
 	fmt.Printf("Visit the URL for the auth dialog: %v\n", uri)
-
-	authWG.Wait()
+	select {
+	case <-ctx.Done():
+		log.Error("context was cancelled")
+		return nil
+	case <-f.waitc:
+	}
 	time.Sleep(time.Second)
 	if err := f.server.Shutdown(context.Background()); err != nil {
 		log.Error(errors.Wrap(err, "error while shutting down server"))
@@ -195,8 +196,8 @@ func (f *firebaseFlow) Auth() *creds.Credentials {
 	return f.credentials
 }
 
-func (f *firebaseFlow) Refresh(refreshToken creds.RefreshToken) (*creds.Credentials, error) {
-	token, err := doFirebaseRefresh(refreshToken, APIKey(f.config.APIKey))
+func (f *firebaseFlow) Refresh(ctx context.Context, refreshToken creds.RefreshToken) (*creds.Credentials, error) {
+	token, err := doFirebaseRefresh(ctx, refreshToken, APIKey(f.config.APIKey))
 	if err != nil {
 		return nil, errors.Wrap(err, "require auth token")
 	}
@@ -217,7 +218,7 @@ func (f *firebaseFlow) Refresh(refreshToken creds.RefreshToken) (*creds.Credenti
 	return f.credentials, nil
 }
 
-func doFirebaseRefresh(token creds.RefreshToken, secret APIKey) (RefreshResponse, error) {
+func doFirebaseRefresh(ctx context.Context, token creds.RefreshToken, secret APIKey) (RefreshResponse, error) {
 	b, err := json.Marshal(struct {
 		RefreshToken string `json:"refresh_token"`
 		GrantType    string `json:"grant_type"`
@@ -229,7 +230,15 @@ func doFirebaseRefresh(token creds.RefreshToken, secret APIKey) (RefreshResponse
 		return RefreshResponse{}, err
 	}
 
-	resp, err := http.Post(fmt.Sprintf("%s?key=%s", refreshURL, secret), http.DetectContentType(b), bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s?key=%s", refreshURL, secret), bytes.NewReader(b))
+	if err != nil {
+		return RefreshResponse{}, err
+	}
+
+	req.Header.Add("Content-Type", http.DetectContentType(b))
+	resp, err := http.DefaultClient.Do(req)
+
+	//resp, err := http.Post(fmt.Sprintf("%s?key=%s", refreshURL, secret), http.DetectContentType(b), bytes.NewReader(b))
 	if err != nil {
 		return RefreshResponse{}, err
 	}
@@ -288,14 +297,14 @@ func (f *firebaseFlow) serve() {
 
 func (f *firebaseFlow) redirectHandler(w http.ResponseWriter, req *http.Request) {
 	// inform Auth function that we can return
-	defer authWG.Done() // TODO if the callback is never hit this will lock here
+	close(f.waitc)
 
 	log.Debugf("redirect invoked")
 	m := req.URL.Query()
 	state := m.Get("state")
 	code := m.Get("code")
 
-	if state != nonce {
+	if state != f.nonce {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}

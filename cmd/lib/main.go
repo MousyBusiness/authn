@@ -2,26 +2,28 @@
 // Should always match pkg/authn/mobile.go
 package main
 
-/*
-#include <stdlib.h>
-*/
 import "C"
 
 import (
-	"crypto/md5"
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/mousybusiness/authn/pkg/creds"
 	"github.com/mousybusiness/authn/pkg/fireb"
 	"os"
-	"unsafe"
 )
 
-var allocated = make(map[string]*C.char)
+var ctx context.Context
+var cancel context.CancelFunc
 
 //export AuthFirebase
 // AuthFirebase will authenticate using Firebase flow and return the refresh token
 func AuthFirebase(title, port, clientID, clientSecret, apiKey, redirectURL *C.char) *C.char {
+	if cancel != nil {
+		cancel()
+	}
+	ctx, cancel = context.WithCancel(context.Background()) // Create a global context to use so we can cancel
+
 	a, err := fireb.New(fireb.Config{
 		Title:        C.GoString(title),
 		Port:         C.GoString(port),
@@ -36,29 +38,27 @@ func AuthFirebase(title, port, clientID, clientSecret, apiKey, redirectURL *C.ch
 		return nil
 	}
 
-	r := a.Auth()
+	r := a.Auth(ctx)
+	if r == nil {
+		return nil
+	}
 
 	b, err := json.Marshal(r)
 	if err != nil {
 		return nil
 	}
 
-	p := C.CString(string(b))
-	hash := fmt.Sprintf("%x", md5.Sum(b))
-
-	if _, ok := allocated[hash]; ok {
-		_, _ = fmt.Fprintf(os.Stderr, "Hash already exist!: %v\n", hash)
-		Free(p)
-	}
-
-	allocated[hash] = p
-
-	return p
+	return C.CString(string(b))
 }
 
 //export ReauthFirebase
 // ReauthFirebase will get a new ID token using the provided refresh token and Firebase credentials
 func ReauthFirebase(apiKey, refreshToken *C.char) *C.char {
+	if cancel != nil {
+		cancel()
+	}
+	ctx, cancel = context.WithCancel(context.Background()) // Create a global context to use so we can cancel
+
 	a, err := fireb.New(fireb.Config{
 		APIKey: C.GoString(apiKey),
 	})
@@ -68,7 +68,7 @@ func ReauthFirebase(apiKey, refreshToken *C.char) *C.char {
 		return nil
 	}
 
-	r, err := a.Refresh(creds.RefreshToken(C.GoString(refreshToken)))
+	r, err := a.Refresh(ctx, creds.RefreshToken(C.GoString(refreshToken)))
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Failed to reauthenticate using Firebase, couldn't refresh token, err: %v\n", err)
 		return nil
@@ -79,43 +79,15 @@ func ReauthFirebase(apiKey, refreshToken *C.char) *C.char {
 		return nil
 	}
 
-	p := C.CString(string(b))
-	hash := fmt.Sprintf("%x", md5.Sum(b))
-
-	if _, ok := allocated[hash]; ok {
-		_, _ = fmt.Fprintf(os.Stderr, "Hash already exist!: %v\n", hash)
-		Free(p)
-	}
-
-	allocated[hash] = p
-
-	return p
+	return C.CString(string(b))
 }
 
-//export Free
-// Free will release memory allocated for token json
-func Free(json *C.char) bool {
-	if json == nil {
-		_, _ = fmt.Fprintf(os.Stderr, "JSON string is nil!\n")
-		return false
+//export Abort
+// Abort will cancel any existing requests if possible
+func Abort() {
+	if cancel != nil {
+		cancel()
 	}
-
-	s := C.GoString(json)
-	if len(s) == 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "JSON string is empty!\n")
-		return false
-	}
-
-	hash := fmt.Sprintf("%x", md5.Sum([]byte(s)))
-	if p, ok := allocated[hash]; ok {
-		_, _ = fmt.Fprintf(os.Stdout, "Freeing %v\n", hash)
-		C.free(unsafe.Pointer(p))
-		_, _ = fmt.Fprintf(os.Stdout, "Free %v\n", hash)
-		delete(allocated, hash)
-		return true
-	}
-
-	return false
 }
 
 ////export AuthPKCE

@@ -47,7 +47,7 @@ bind_mobile() {
 
   if ! [[ "$ANDROID_ONLY" == "true" ]]; then
     echo "Building iOS"
-    (cd "$ENTRYPOINT_DIR" && gomobile bind  --target=ios/arm64) #-o $IOS_NAME
+    (cd "$ENTRYPOINT_DIR" && gomobile bind  --target=ios) #-o $IOS_NAME
     rm -rf "$IOS_DIR/$IOS_NAME"
     mv "$ENTRYPOINT_DIR/$IOS_NAME" "$IOS_DIR"
   fi
@@ -66,4 +66,4 @@ echo "Building Darwin shared library"
 #echo "Building Windows shared library"
 #(cd $DIR/../cmd/lib && GOOS=windows GOARCH=amd64 go build -o ../../build/windows_amd64/authn.so -buildmode=c-shared main.go)
 
-bind_mobile
+#bind_mobile
