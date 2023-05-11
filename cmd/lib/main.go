@@ -19,6 +19,9 @@ var cancel context.CancelFunc
 //export AuthFirebase
 // AuthFirebase will authenticate using Firebase flow and return the refresh token
 func AuthFirebase(title, port, clientID, clientSecret, apiKey, redirectURL *C.char) *C.char {
+
+
+// TODO
 	if cancel != nil {
 		cancel()
 	}
